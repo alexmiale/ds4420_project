@@ -1,2 +1,5 @@
 data/full_data.zip
 data/full_data.csv
+.Rproj.user
+.DS_Store
+**/.DS_Store
