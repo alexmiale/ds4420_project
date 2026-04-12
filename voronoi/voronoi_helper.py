@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from scipy.spatial import Voronoi
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPoint
 from mplsoccer import Pitch
 from tqdm import tqdm
 
@@ -14,9 +14,11 @@ HOME_COLOR       = "#00A8E0"
 AWAY_COLOR       = "#E05200"
 BG_COLOR         = "white"
 LINE_COLOR       = "#aaaaaa"
-ALPHA_FILL       = 0.35
+ALPHA_DEF        = 0.6
+ALPHA_ATT        = 0.3
 DPI              = 72
-ARROW_SCALE      = 1.5   # tune this: larger = longer arrows
+ARROW_SCALE      = 0.3
+HULL_T           = 0.5   # time horizon (seconds) for dynamic hull projection
 
 
 # ── LOAD MATCH ─────────────────────────────────────────────────────────────────
@@ -42,40 +44,57 @@ def load_match(match_id):
 
 # ── INTERPOLATE MISSING FRAMES ─────────────────────────────────────────────────
 def interpolate_frames(clip):
-    """Fill in missing frames by linearly interpolating player positions,
-    then recompute velocity from the interpolated positions."""
+    """Interpolate missing frames and recompute velocity from positions."""
     clip = clip.drop_duplicates(subset=["player_id", "frame"], keep="first")
-    all_frames  = np.arange(clip["frame"].min(), clip["frame"].max() + 1)
-    interp_rows = []
-
+    all_frames   = np.arange(clip["frame"].min(), clip["frame"].max() + 1)
     non_num_cols = [c for c in clip.select_dtypes(exclude=np.number).columns
                     if c not in ["player_id", "frame"]]
+    interp_rows  = []
 
     for pid in clip["player_id"].unique():
         pdf      = clip[clip["player_id"] == pid].set_index("frame").sort_index()
         num_cols = pdf.select_dtypes(include=np.number).columns
         pdf_i    = pdf[num_cols].reindex(all_frames).interpolate(method="index").reset_index()
         pdf_i.rename(columns={"index": "frame"}, inplace=True)
-
-        # Recompute velocity from interpolated x/y instead of interpolating vx/vy
-        pdf_i["vx_f"] = pdf_i["x"].diff().fillna(0)   # m/frame
+        pdf_i["vx_f"] = pdf_i["x"].diff().fillna(0)
         pdf_i["vy_f"] = pdf_i["y"].diff().fillna(0)
-
         for col in non_num_cols:
             if col in pdf.columns:
                 pdf_i[col] = pdf[col].reindex(all_frames).ffill().bfill().values
-
         pdf_i["player_id"] = pid
         interp_rows.append(pdf_i)
 
     return pd.concat(interp_rows, ignore_index=True)
 
 
+# ── DYNAMIC HULL ───────────────────────────────────────────────────────────────
+def dynamic_hull(team_fdf, t=HULL_T):
+    """
+    Convex hull incorporating both current positions and velocity-projected positions.
+    Players moving fast stretch the hull further in their direction of movement.
+    """
+    points = []
+    for _, row in team_fdf.iterrows():
+        x, y   = row["x"], row["y"]
+        vx, vy = row["vx_f"], row["vy_f"]
+        x_proj = x + vx * t * FRAME_RATE
+        y_proj = y + vy * t * FRAME_RATE
+        points.append((x, y))
+        points.append((x_proj, y_proj))
+    return MultiPoint(points).convex_hull
+
+
 # ── CLIPPED VORONOI ────────────────────────────────────────────────────────────
-def clipped_voronoi(points):
-    x0, x1 = -PITCH_W/2, PITCH_W/2
-    y0, y1 = -PITCH_H/2, PITCH_H/2
+def clipped_voronoi(points, hull=None):
+    """
+    Voronoi clipped to pitch boundary and optionally to a hull polygon.
+    Points are the player positions for one team only.
+    """
+    x0, x1     = -PITCH_W/2, PITCH_W/2
+    y0, y1     = -PITCH_H/2, PITCH_H/2
     pitch_poly = Polygon([(x0,y0),(x1,y0),(x1,y1),(x0,y1)])
+    clip_region = pitch_poly.intersection(hull) if hull is not None else pitch_poly
+
     pad = max(PITCH_W, PITCH_H) * 2
     mirror = np.vstack([
         points,
@@ -90,7 +109,7 @@ def clipped_voronoi(points):
         region = vor.regions[vor.point_region[i]]
         if not region or -1 in region:
             polys.append(None); continue
-        poly = Polygon(vor.vertices[region]).intersection(pitch_poly)
+        poly = Polygon(vor.vertices[region]).intersection(clip_region)
         polys.append(poly if not poly.is_empty else None)
     return polys
 
@@ -124,12 +143,6 @@ def make_voronoi_clip(
             raise ValueError("Could not determine home team")
         clip["team_id_plot"] = (clip["team_id"] == home_id.iloc[0]).astype(int)
 
-    # vx_f/vy_f already computed in interpolate_frames (m/frame)
-    # if not present (no interpolation), compute from vx_kmh
-    if "vx_f" not in clip.columns:
-        clip["vx_f"] = clip["vx_kmh"] / 3.6
-        clip["vy_f"] = clip["vy_kmh"] / 3.6
-
     color_map = {1: HOME_COLOR, 0: AWAY_COLOR}
     frames    = sorted(clip["frame"].unique())[::frame_step]
 
@@ -159,20 +172,25 @@ def make_voronoi_clip(
                 att_color = color_map[poss_tid]
                 def_color = color_map[1 - poss_tid]
 
-        all_pts    = fdf[["x","y"]].values
-        def_ids    = set(def_fdf["player_id"].values)
-        player_ids = fdf["player_id"].values
-        polys      = clipped_voronoi(all_pts)
-
+        # Two independent Voronois clipped to each team's dynamic hull
         cells = []
-        for j, poly in enumerate(polys):
-            if poly is None or poly.is_empty or player_ids[j] not in def_ids:
+        for team_fdf, color, z, alpha in [
+            (att_fdf, att_color, 2, ALPHA_ATT),  # attacking: bottom
+            (def_fdf, def_color, 3, ALPHA_DEF),  # defending: top
+        ]:
+            if team_fdf.empty or len(team_fdf) < 3:
                 continue
-            try:
-                xs, ys = poly.exterior.xy
-                cells.append((list(xs), list(ys), def_color))
-            except Exception:
-                pass
+            pts  = team_fdf[["x","y"]].values
+            hull = dynamic_hull(team_fdf)
+            polys = clipped_voronoi(pts, hull=hull)
+            for poly in polys:
+                if poly is None or poly.is_empty:
+                    continue
+                try:
+                    xs, ys = poly.exterior.xy
+                    cells.append((list(xs), list(ys), color, z, alpha))
+                except Exception:
+                    pass
 
         frame_data[fn] = {
             "cells":     cells,
@@ -205,9 +223,9 @@ def make_voronoi_clip(
         fn = valid_frames[i]
         fd = frame_data[fn]
 
-        for xs, ys, c in fd["cells"]:
-            added += ax.fill(xs, ys, color=c, alpha=ALPHA_FILL, zorder=2)
-            added += ax.plot(xs, ys, color=c, lw=0.8, alpha=0.8, zorder=3)
+        for xs, ys, c, z, alpha in fd["cells"]:
+            added += ax.fill(xs, ys, color=c, alpha=alpha, zorder=z)
+            added += ax.plot(xs, ys, color=c, lw=0.8, alpha=alpha, zorder=z)
 
         dc = fd["def_color"]
         if len(fd["def"]):
