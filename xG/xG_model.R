@@ -167,7 +167,7 @@ pitch_custom <- list(
   origin_y = -75
 )
 
-ggplot(results_df) +
+all_shots_plot <- ggplot(results_df) +
   annotate_pitch(dimensions = pitch_custom) +
   geom_point(aes(x=ball_x, y=ball_y, size=pred, color=is_header, shape = actual)) +
   geom_text(data = results_df,
@@ -180,6 +180,8 @@ ggplot(results_df) +
   theme_pitch() +
   theme(plot.title = element_text(color = '#111111', hjust = 0.5, size = 14))
 
+ggsave(paste0('visualizations/all_shots_plot.png'), plot=all_shots_plot, dpi = 150)
+
 
 # Plot Distribution of a single shot
 for (i in 10:15) { 
@@ -188,7 +190,7 @@ for (i in 10:15) {
   png(paste0('visualizations/histogram_', i, '.png'), width = 800, height = 600)
   hist_plot <- hist(shot_xg_dist, 
        breaks = 50,
-       main   = paste('xG distribution — shot', i),
+       main   = paste('xG distribution: shot', i),
        col    = '#355070',
        border = 'white')
   dev.off()
@@ -203,7 +205,7 @@ for (i in 10:15) {
     scale_size_continuous(name = 'xG') +
     scale_color_manual(name = 'Header', values = c('0' = '#355070', '1' = '#D90429')) +
     scale_shape_manual(name = 'Outcome', values = c('0' = 1, '1' = 16)) +
-    labs(title = 'Goals — predicted xG') +
+    labs(title = paste('xG Prediction: shot', i)) +
     theme_pitch() +
     theme(plot.title = element_text(color = '#111111', hjust = 0.5, size = 14))
   
