@@ -122,7 +122,7 @@ png('visualizations/acf_y2.png', width = 800, height = 600)
 acf(samples[, 2], main = 'Metropolis Y2 Samples ACF Plot')
 dev.off()
 
-thinned_samples <- samples[seq(1, nrow(samples), by = 50), ] 
+thinned_samples <- samples[seq(1, nrow(samples), by = 65), ] 
 
 png('visualizations/acf_thinned_y1.png', width = 800, height = 600)
 acf(thinned_samples[, 1], main = 'Metropolis Y1 (thinned) Samples ACF Plot')
@@ -132,7 +132,7 @@ png('visualizations/acf_thinned_y2.png', width = 800, height = 600)
 acf(thinned_samples[, 2], main = 'Metropolis Y2 (thinned) Samples ACF Plot')
 dev.off()
 
-colMeans(thinned_samples)
+round(colMeans(thinned_samples), 4)
 
 
 
@@ -182,7 +182,7 @@ all_shots_plot <- ggplot(results_df) +
   theme(plot.title = element_text(color = '#111111', hjust = 0.5, size = 14))
 
 ggsave(paste0('visualizations/all_shots_plot.png'), plot=all_shots_plot, dpi = 150)
-all_shots_plot
+
 
 # Plot Distribution of a single shot
 for (i in 10:15) { 
@@ -215,10 +215,15 @@ for (i in 10:15) {
 }
 
 # Evaluating the model
-results_df$actual <- as.numeric(results_df$actual)
+results_df$actual <- y_test
 results_df$pred   <- as.numeric(results_df$pred)
 
 log_loss <- logLoss(results_df$actual, results_df$pred)
 auc_score  <- auc(roc(results_df$actual, results_df$pred))
 cat('Log Loss: ', round(log_loss,  4), '\n')
 cat('AUC Score: ', round(auc_score, 4), '\n')
+
+goal_total = sum(shots$goal == 1)
+shot_total = length(shots$goal)
+cat('Scoring Rate: ', round((goal_total / shot_total), 4))
+goal_total
