@@ -27,18 +27,18 @@ X <- model.matrix(~ distance + angle + gk_dist + gk_angle_blocked + defenders_co
 y <- train_data$goal
 
 # Priors
-prior_mu <- matrix(c(-1,     # intercept
-                     -2,     # distance
+prior_mu <- matrix(c(-2,     # intercept
+                     -1,     # distance
                       2,     # angle
-                      .2,    # gk_dist
-                       -1,   # gk_angle_blocked
-                      -.3,   # defenders_cone
-                      -.5,   # pressure
-                      .3,    # one_touch
+                      .3,    # gk_dist
+                      -.7,   # gk_angle_blocked
+                      -.5,   # defenders_cone
+                      0,   # pressure
+                      .5,    # one_touch
                       -.3,   # is_header
-                      -.1,   # phase_type set_play
-                      .3,    # phase_type transition
-                      0      # phase_type quick_break
+                      -.25,   # phase_type set_play
+                      .2,    # phase_type transition
+                      -.2      # phase_type quick_break
 ), ncol = 1)
 
 prior_Sigma <- diag(c(1,  # intercept
@@ -56,14 +56,14 @@ prior_Sigma <- diag(c(1,  # intercept
 ))
 
 prior <- function(beta) {
-  mu  <- as.numeric(prior_mu)
-  sds <- as.numeric(sqrt(diag(prior_Sigma)))
-  prod(dnorm(as.numeric(beta), mean = mu, sd = sds))
+  mu  <- prior_mu
+  sds <- sqrt(diag(prior_Sigma))
+  prod(dnorm(beta, mean = mu, sd = sds))
 }
 
 likelihood <- function(beta, X, y) {
   p <- 1 / (1 + exp(-X %*% beta))
-  prod(dbinom(as.vector(y), size = 1, prob = p))
+  prod(dbinom(y, size = 1, prob = p))
 }
 
 posterior <- function(beta, X, y) {
@@ -103,6 +103,7 @@ metropolis_sampling <- function(n = 10000, sd = 1.25, burn = 0.18) {
 
 samples <- metropolis_sampling(n = 500000, sd = 0.22, burn = 0.18)
 print(nrow(samples))
+
 png('visualizations/convergence_y1.png', width = 800, height = 600)
 plot(samples[, 1], type = 'l', main = 'Convergence of Y1 Samples', 
      xlab = 'Iteration', ylab = 'Y1')
@@ -181,7 +182,7 @@ all_shots_plot <- ggplot(results_df) +
   theme(plot.title = element_text(color = '#111111', hjust = 0.5, size = 14))
 
 ggsave(paste0('visualizations/all_shots_plot.png'), plot=all_shots_plot, dpi = 150)
-
+all_shots_plot
 
 # Plot Distribution of a single shot
 for (i in 10:15) { 
@@ -190,8 +191,9 @@ for (i in 10:15) {
   png(paste0('visualizations/histogram_', i, '.png'), width = 800, height = 600)
   hist_plot <- hist(shot_xg_dist, 
        breaks = 50,
-       main   = paste('xG distribution: shot', i),
-       col    = '#355070',
+       main = paste('xG distribution: shot', i),
+       col = '#355070',
+       xlab = 'xG',
        border = 'white')
   dev.off()
   
@@ -213,8 +215,8 @@ for (i in 10:15) {
 }
 
 # Evaluating the model
-results_df$actual <- as.numeric(as.character(results_df$actual))
-results_df$pred   <- as.numeric(as.character(results_df$pred))
+results_df$actual <- as.numeric(results_df$actual)
+results_df$pred   <- as.numeric(results_df$pred)
 
 log_loss <- logLoss(results_df$actual, results_df$pred)
 auc_score  <- auc(roc(results_df$actual, results_df$pred))
