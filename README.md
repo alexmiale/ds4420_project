@@ -1,7 +1,5 @@
 # ds4420_project
 
+As teams increase revenue and find themselves with lots of data, they look to back up the assessment of analysts and coaches with objective metrics. There are lots of different ways to try to use this data simply (pass success rate), but it is very difficult to quantify how good or bad an action is. 
 
-We want to create a kind of threat-reduction index for defenders. When a team is in possession, we can model the probabilities that they will make a pass and complete it. By computing the difference in expected possession value from one state to another state, we can combine the state change, the probabilities of the pass and success, and a Voronoi diagram of defenders’ positions to calculate a score that quantifies how the defense, and each defender, performed in that action. 
-
-
-Our proof of concept is in the folder of pictures that demonstrate the ideation of our project. 
+This project uses machine learning to predict a soccer team's attacking output. We use a neural network to create an expected possession value (EPV) model that predicts the likelihood of a goal being scored from the current possession. We also create an expected goals (xG) model using Bayesian Logistic Regression, predicting the likelihood of any given shot being scored. The data for this project was from SkillCorner, using their 10-game, open data from the Australian A-League. We process the data by combining event and tracking data before sending shots to the xG model and frame-by-frame event data to the EPV model. 
